@@ -32,6 +32,7 @@ At the end of the day, a smaller image should always be desired, especially when
 ## The Solution
 Introducing **Gopherfile**. I created Gopherfile for the people of the Internet to use as a good "default" Dockerfile when dealing with Go images.
 ```
+➜  go mod vendor
 ➜  docker build -t gopherimg .
 Sending build context to Docker daemon  13.44MB
 Step 1/15 : FROM golang:alpine as build
@@ -54,36 +55,33 @@ Here is the file that I've been preaching.
 # Gopherfile
 # github.com/TheTannerRyan/Gopherfile
 
-FROM golang:alpine as build
-ENV GOPATH /go
+FROM golang:alpine as gopherfile
+ENV GO111MODULE on
 
 RUN adduser -D -g '' gopher
-COPY . /go/src/docker
-WORKDIR /go/src/docker
+WORKDIR /data
 
 # certificates + timezone data
 RUN apk update
 RUN apk --no-cache add ca-certificates tzdata
 
-# optional (dependency management)
+# dependency management
 RUN apk add git
-RUN go get -u github.com/golang/dep/cmd/dep
-RUN dep ensure --vendor-only
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s" -o /go/bin/exec
+FROM gopherfile as build
+COPY . /data
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -mod=vendor -installsuffix cgo -ldflags="-w -s" -o /data/entrypoint
 
 FROM scratch
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /etc/passwd /etc/passwd
-COPY --from=build /go/bin/exec /go/bin/exec
+COPY --from=build /data /
 USER gopher
 
-ENTRYPOINT ["/go/bin/exec"]
-
-# optional (networking)
-EXPOSE 3000
+ENTRYPOINT ["/entrypoint"]
 ```
 Now this isn't doing any *real* magic, but rather is taking advantage of two technical features:
 1) Dockers multi-stage builds
@@ -94,15 +92,15 @@ Docker multi-stage builds allow the use of multiple containers for building imag
 During the compilation process, the standard `go build main.go` isn't being used. The large build script is performing cross compilation while stripping all unrequired objects from the binary. This allows for the smallest image (without modifying the existing program).
 
 ## Usage
-Gopherfile may only require very minor changes to work with your current program. Note the two optional blocks: **dependency management** and **networking**. Modify/remove these blocks as required.
-
-With the current setup, `dep` is being used as the dependency manager. If you're using other tools such as `Glide`, you will need to modify the file.
+With the current setup, Go modules are being used as the dependency manager. If you're using other tools such as `dep`, you will need to modify the file.
 
 The standard build process is still used. Running something like this should work (again, modify as required):
 ```
-docker build -t gopherimg src
+cd src
+go mod vendor
+docker build -t gopherimg .
 docker run -d --restart=unless-stopped -p 80:3000 --name server gopherimg
 ```
 
 ## Questions + Issues
-If you have any questions or issues, you know what you could do.
+If you have any questions or issues, you know what to do.
